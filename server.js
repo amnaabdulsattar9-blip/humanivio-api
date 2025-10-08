@@ -131,10 +131,11 @@ app.get('/api/health', (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Humanivio API server running on port ${PORT}`);
   console.log(`📝 API endpoint: http://localhost:${PORT}/api/humanize`);
   console.log(`❤️  Health check: http://localhost:${PORT}/api/health`);
 });
+
 
 module.exports = app;
