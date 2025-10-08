@@ -7,51 +7,59 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Allow configuring the daily limit via env, default to 1000
+const RATE_LIMIT_POINTS = parseInt(process.env.RATE_LIMIT_POINTS, 10) || 1000;
+
 // Initialize OpenAI
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// Rate limiting setup
+// Rate limiting setup (in-memory). For production across multiple instances, use Redis.
 const rateLimiter = new rateLimit.RateLimiterMemory({
-  keyGenerator: (req) => req.ip,
-  points: 10, // 10 requests
-  duration: 24 * 60 * 60, // per 24 hours
+  points: RATE_LIMIT_POINTS, // requests per key (IP)
+  duration: 24 * 60 * 60,    // seconds (24 hours)
 });
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
+// Friendly root route so GET / doesn't return "Cannot GET /"
+app.get('/', (req, res) => {
+  res.send('✅ Humanivio API is live and ready to humanize your text!');
+});
+
 // Rate limiting middleware
 app.use(async (req, res, next) => {
   try {
+    // Use the client's IP as the key
     await rateLimiter.consume(req.ip);
     next();
   } catch (rejRes) {
     res.status(429).json({
-      error: 'Daily limit exceeded. Please try again tomorrow.'
+      error: 'Free daily limit reached. Please try again tomorrow or consider upgrading for higher limits.'
     });
   }
 });
 
-// Humanize API endpoint
+// Humanize API endpoint (POST)
 app.post('/api/humanize', async (req, res) => {
   try {
     const { text } = req.body;
 
     // Validate input
     if (!text || text.trim() === '') {
-      return res.status(400).json({ 
-        error: 'Please provide text to humanize' 
+      return res.status(400).json({
+        error: 'Please provide text to humanize'
       });
     }
 
     // Check word count
     const wordCount = text.trim().split(/\s+/).length;
     if (wordCount > 1000) {
-      return res.status(400).json({ 
-        error: 'Text exceeds 1000 words limit' 
+      return res.status(400).json({
+        error: 'Text exceeds 1000 words limit'
       });
     }
 
@@ -77,46 +85,46 @@ app.post('/api/humanize', async (req, res) => {
         }
       ],
       max_tokens: 2000,
-      temperature: 0.8, // Higher temperature for more creative/varued output
-      presence_penalty: 0.2, // Encourages using new phrases
-      frequency_penalty: 0.3, // Discourages repetition
+      temperature: 0.8,
+      presence_penalty: 0.2,
+      frequency_penalty: 0.3,
     });
 
-    const humanizedText = completion.choices[0].message.content;
-    
+    const humanizedText = completion?.choices?.[0]?.message?.content || '';
+
     console.log('Successfully humanized text');
-    res.json({ 
-      humanizedText,
+    res.json({
+      humanizedText: humanizedText.trim(),
       originalWordCount: wordCount,
-      humanizedWordCount: humanizedText.split(/\s+/).length
+      humanizedWordCount: humanizedText ? humanizedText.trim().split(/\s+/).length : 0
     });
-    
+
   } catch (error) {
     console.error('Error:', error);
-    
-    // Handle specific OpenAI errors
+
+    // Handle specific OpenAI errors (best-effort)
     if (error.code === 'insufficient_quota') {
-      return res.status(500).json({ 
-        error: 'API quota exceeded. Please check your OpenAI account.' 
+      return res.status(500).json({
+        error: 'API quota exceeded. Please check your OpenAI account.'
       });
     }
-    
+
     if (error.code === 'invalid_api_key') {
-      return res.status(500).json({ 
-        error: 'Invalid API key. Please check your configuration.' 
+      return res.status(500).json({
+        error: 'Invalid API key. Please check your configuration.'
       });
     }
-    
-    res.status(500).json({ 
-      error: 'Failed to humanize text. Please try again.' 
+
+    res.status(500).json({
+      error: 'Failed to humanize text. Please try again.'
     });
   }
 });
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+  res.json({
+    status: 'OK',
     service: 'Humanivio API',
     timestamp: new Date().toISOString()
   });
